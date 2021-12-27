@@ -74,12 +74,16 @@ class SLM:
         return self.draw()
 
     def animate(self,theta_range):
-        self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(theta_range[0], theta_range[1], 0.025),np.arange(theta_range[1], theta_range[0], -0.025)), interval=10, repeat=True)
+        self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(theta_range[0], theta_range[1], 0.025),np.arange(theta_range[1], theta_range[0], -0.025)), interval=100, repeat=True)
         plt.show()
 
+# A = [1,1]
+# B = [1.1,.9,1,1]
+# C = [2.75,2.65]
+# theta_range = [-0.75,0.75]
 A = [1,1]
-B = [1.1,.9,1,1]
-C = [2.75,2.65]
+B = [1,1.2,1,1.2]
+C = [2.656889,2.738441]
 theta_range = [-0.75,0.75]
 
 # ### Straight Line Example
