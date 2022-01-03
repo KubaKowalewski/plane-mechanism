@@ -33,10 +33,12 @@ class Mechanism:
         # Finds linear fit for path
         m, b, r, p, se = stats.linregress(self.path_y,self.path_x)
         self.fit_x = self.path_x
+        print(m,b)
         linear = lambda x: m*x + b
-        self.fit_y = map(linear,self.fit_x)
+        self.fit_y = list(map(linear,self.fit_x))
         self.r2 = r**2
         print(self.r2)
+        print(self.fit_x)
 
 
     def norm(self,V):
@@ -66,8 +68,8 @@ class Mechanism:
     def draw(self):
         self.ax.cla()
         # draw path
-        plt.plot(self.path_x,self.path_y)
-        plt.plot(self.fit_x,self.fit_y)
+        # plt.plot(self.path_x,self.path_y)
+        plt.plot(self.fit_x,self.fit_y,'r')
         n_p = [(0,1),(1,2),(2,3),(2,4),(3,5),(4,5),(0,3),(0,4)] # Node pairs
         # Draw all links
         for i in range(self.num_links):
