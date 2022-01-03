@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from scipy import stats
 
-class SLM:
+class Mechanism:
     def __init__(self,A,B,C,theta_range,theta=0):
         # State Variables
         self.A = A
@@ -10,20 +11,34 @@ class SLM:
         self.C = C
         self.links = A + B + C
         self.colors = ["red","red","blue","blue","blue","blue","purple","purple"] # Link colors
-        print(self.links)
+        self.theta_range = theta_range
         self.theta = theta
         self.update_state()
         # Plotting Variables
         self.fig, self.ax = plt.subplots()
         self.link_width = 4
         self.num_links = 8
+        # Find path of SLM and linear fit
+        self.path()
+        
+    def path(self):
+        # Calculates path
         self.path_x = []
         self.path_y = []
-        for i in np.arange(theta_range[0],theta_range[1],0.025):
-            path_i = self.calculate_state(i)
-            self.path_x.append(path_i[-1][0])
-            self.path_y.append(path_i[-1][1])
-         
+        for i in np.arange(self.theta_range[0],self.theta_range[1],0.025):
+            state_i = self.calculate_state(i)
+            self.path_x.append(state_i[-1][0])
+            self.path_y.append(state_i[-1][1])
+        
+        # Finds linear fit for path
+        m, b, r, p, se = stats.linregress(self.path_y,self.path_x)
+        self.fit_x = self.path_x
+        linear = lambda x: m*x + b
+        self.fit_y = map(linear,self.fit_x)
+        self.r2 = r**2
+        print(self.r2)
+
+
     def norm(self,V):
         return sum(V*V)**0.5    
 
@@ -52,13 +67,13 @@ class SLM:
         self.ax.cla()
         # draw path
         plt.plot(self.path_x,self.path_y)
+        plt.plot(self.fit_x,self.fit_y)
         n_p = [(0,1),(1,2),(2,3),(2,4),(3,5),(4,5),(0,3),(0,4)] # Node pairs
         # Draw all links
         for i in range(self.num_links):
             n0 = n_p[i][0]
             n1 = n_p[i][1]
             plt.plot([self.N[n0][0],self.N[n1][0]],[self.N[n0][1],self.N[n1][1]],linewidth=self.link_width,c=self.colors[i])
-
         # Draw all nodes
         for N in self.N:
             plt.scatter(N[0],N[1],s=50,c="black",zorder=10)
@@ -77,26 +92,3 @@ class SLM:
         self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(theta_range[0], theta_range[1], 0.025),np.arange(theta_range[1], theta_range[0], -0.025)), interval=100, repeat=True)
         plt.show()
 
-# A = [1,1]
-# B = [1.1,.9,1,1]
-# C = [2.75,2.65]
-# theta_range = [-0.75,0.75]
-A = [1,1]
-B = [1,1.2,1,1.2]
-C = [2.656889,2.738441]
-theta_range = [-0.75,0.75]
-
-# ### Straight Line Example
-SLM_1 = SLM(A,B,C,theta_range)
-SLM_1.animate(theta_range)
-
-### Straight Line Example
-# import random
-# max_noise = 0.1
-# noise = lambda x: x + random.uniform(-max_noise,max_noise)
-# A = list(map(noise,A))
-# B = list(map(noise,B))
-# C = list(map(noise,C))
-# print(A)
-# SLM_1 = SLM(A,B,C,theta_range)
-# SLM_1.animate(theta_range)       
