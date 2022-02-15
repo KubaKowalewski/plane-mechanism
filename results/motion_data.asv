@@ -1,0 +1,6 @@
+T = readtable('PPM_TEST1.csv');
+figure(1); clf;
+scatter3(T.X,T.Y,T.Z,'.');
+xlabel("X (mm)");
+ylabel("X (mm)");
+zlabel("Z (mm)");
