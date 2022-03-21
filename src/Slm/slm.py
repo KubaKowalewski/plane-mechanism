@@ -24,9 +24,7 @@ class mechanism:
             self.B = list(map(noise,B))
             self.C = list(map(noise,C))
         # Check if this is valid SLM
-        if not self.is_valid():
-            raise Exception("Invalid SLM")
-        print("Valid!")
+        self.is_valid()
         # Store metrics for measuring model performance
         self.coef_list = []
         self.rmse_list = []
@@ -50,6 +48,10 @@ class mechanism:
         if "dA" in kwargs: self.A += kwargs["dA"]
         if "dB" in kwargs: self.B += kwargs["dB"]
         if "dC" in kwargs: self.C += kwargs["dC"]
+        # Check if valid
+        self.is_valid()
+        # Find range
+        self.theta_range = self.calculate_range()
 
     # Swaps links in the symmetric groups
     def swap_symmetric(self):
@@ -69,11 +71,15 @@ class mechanism:
 
     # Checks if link lengths create valid mechanism
     def is_valid(self):
+        continous_range = (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[0]**2) < self.C[0]) and (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[1]**2) < self.C[1])
         valid_lower = (self.A[0] + self.A[1] + self.B[0] > self.C[0]) and (self.A[0] + self.A[1] + self.B[1] > self.C[1])
         theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
         theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
         valid_upper = (self.B[2] > self.C[0]*np.cos(theta0))and (self.B[3] > self.C[1]*np.cos(theta1))
-        return valid_lower and valid_upper
+        if not (continous_range and valid_lower and valid_upper):
+            raise Exception("Invalid SLM")
+        else:
+            print("Valid SLM!")
 
     # Numerically finds the max theta range for mechanism
     def calculate_range(self):
@@ -81,7 +87,7 @@ class mechanism:
         a = np.average(self.A)
         b_lower = np.average([self.B[0],self.B[1]])
         c = np.average(self.C)
-        self.MAX_THETA = np.pi-self.law_of_cos(c-b_lower,a,a)
+        self.MAX_THETA = 0.98*np.pi-self.law_of_cos(c-b_lower,a,a)
         N = self.calculate_state(self.MAX_THETA)
         self.MAX_L = 2*N[5][1]
         self.LIMIT_THETA = self.MAX_THETA*limit
@@ -221,6 +227,22 @@ class mechanism:
             self.k_path_y.append(dN[-1][0])
             self.k_path_x.append(dN[-1][1])
 
+    def find_system_properties(self,F,E,D,P):
+        # Maximum stiffness
+        N = self.calculate_state(0)
+        thetas = self.find_link_angles(N)
+        stiff_res = self.calculate_stiffness(F,thetas,E,D)
+        k_max = stiff_res[0] # Max stiffness
+        # Minimum stiffness
+        N = self.calculate_state(self.LIMIT_THETA)
+        thetas = self.find_link_angles(N)
+        stiff_res = self.calculate_stiffness(F,thetas,E,D)
+        k_min = stiff_res[0] # Max stiffness
+        L = np.sum(np.concatenate((self.A,self.B,self.C)))
+        A = (np.pi/4)*(D/1000)**2
+        weight = L*A*P
+        return(k_max,k_min,self.LIMIT_L,weight)
+
     ####################
     # KINEMATIC ANIMATION
     ####################
@@ -283,11 +305,12 @@ class mechanism:
         for i in range(self.num_links):
             n0 = n_p[i][0]
             n1 = n_p[i][1]
-            plt.plot([self.N[n0][0],self.N[n1][0]],[self.N[n0][1],self.N[n1][1]],linewidth=self.link_width,c=self.colors[i])
+            plt.plot([self.N[n0][0],self.N[n1][0]],[self.N[n0][1],self.N[n1][1]],
+                    linewidth=self.link_width,c=self.colors[i])
         # Draw all nodes
         for N in self.N:
             plt.scatter(N[0],N[1],s=50,c="black",zorder=10)
-        plt.xlim([-.5, self.A[0]+self.A[1]+1.5*max(self.B)])
+        plt.xlim([-.5, self.A[0]+self.A[1]+1*max(self.B)])
         plt.ylim([self.path_x[0], self.path_x[-1]])
         plt.gca().set_aspect("equal")
         plt.grid()
@@ -305,11 +328,12 @@ class mechanism:
     # Animates mechanism moving across theta range
     def animate(self,theta_range = None):
         if theta_range == None:
-            theta_range = [-self.MAX_THETA,self.MAX_THETA]
+            theta_range = [-self.LIMIT_THETA,self.LIMIT_THETA]
         # Plotting Variables
         self.fig = plt.figure(3)
         self.ax = plt.gca()
-        self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(theta_range[0], theta_range[1], 0.025),np.arange(theta_range[1], theta_range[0], -0.025)), interval=100, repeat=True)
+        self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(theta_range[0], 
+                            theta_range[1], 0.025),np.arange(theta_range[1], theta_range[0], -0.025)), interval=100, repeat=True)
         plt.show()
 
     ####################
@@ -377,7 +401,7 @@ class mechanism:
         plt.show()
     
     # Used to update frames ion animation
-    def update_frame(self,frame_index):
+    def update_frame_k(self,frame_index):
         self.theta = self.theta_array[frame_index]
         d = self.d_array[frame_index] 
         self.update_state()
@@ -386,11 +410,12 @@ class mechanism:
     # Animates structural response to loading
     def animate_stiffness(self,theta_range = None,save=False):
         if theta_range == None:
-            theta_range = [-self.MAX_THETA,self.MAX_THETA]
+            theta_range = [-self.LIMIT_THETA,self.LIMIT_THETA]
             # Plotting Variables
             self.fig = plt.figure(3)
             self.ax = plt.gca()
-            self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame, frames=np.append(np.arange(0,len(self.theta_array),1),np.arange(len(self.theta_array)-1,0,-1)), interval=100, repeat=True)
+            self.slm_animation = animation.FuncAnimation(self.fig, self.update_frame_k, frames=np.append(np.arange(0,len(self.theta_array),1),
+                                np.arange(len(self.theta_array)-1,0,-1)), interval=100, repeat=True)
             if save:
                 print("SAVING VIDEO")
                 # Writer = animation.writers['ffmpeg']
