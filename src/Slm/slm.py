@@ -7,15 +7,16 @@ import random
 
 class mechanism:
     # Initializes mechanism
-    def __init__(self,A,B,C,theta=0,**kwargs):
+    def __init__(self,A,B,C,version=1,**kwargs):
         # State Variables
+        self.version = version # specifies which SLM version is being used
         self.A = A
         self.B = B
         self.C = C
         self.lengths = np.array([self.A[1],self.B[1],self.B[0],self.B[3],self.B[2],self.C[1],self.C[0]])
         self.colors = ["red","red","blue","blue","blue","blue","purple","purple"] # Link colors
         self.theta_range = self.calculate_range()
-        self.theta = theta
+        self.theta = 0
         self.step_size = 0.01
         if "add_noise" in kwargs and "noise" in kwargs and kwargs["add_noise"]:
             max_noise = kwargs["noise"]
@@ -71,12 +72,18 @@ class mechanism:
 
     # Checks if link lengths create valid mechanism
     def is_valid(self):
-        continous_range = (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[0]**2) < self.C[0]) and (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[1]**2) < self.C[1])
-        valid_lower = (self.A[0] + self.A[1] + self.B[0] > self.C[0]) and (self.A[0] + self.A[1] + self.B[1] > self.C[1])
-        theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
-        theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
-        valid_upper = (self.B[2] > self.C[0]*np.cos(theta0))and (self.B[3] > self.C[1]*np.cos(theta1))
-        if not (continous_range and valid_lower and valid_upper):
+        if self.version == 1:
+            continous_range = (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[0]**2) < self.C[0]) and (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[1]**2) < self.C[1])
+            valid_lower = (self.A[0] + self.A[1] + self.B[0] > self.C[0]) and (self.A[0] + self.A[1] + self.B[1] > self.C[1])
+            theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
+            theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
+            valid_upper = (self.B[2] > self.C[0]*np.cos(theta0)) and (self.B[3] > self.C[1]*np.cos(theta1))
+            valid = continous_range and valid_lower and valid_upper
+        if self.version == 2:
+            valid_concave = (self.A[0]+self.A[1] + self.C[1] > self.B[1]) and (self.A[0]+self.A[1] + self.C[0] > self.B[0])
+            valid_convex = (self.B[1] + self.C[1] > self.A[0] + self.A[1]) and (self.B[0] + self.C[0] > self.A[0] + self.A[1]) 
+            valid = valid_concave or valid_convex
+        if not valid:
             raise Exception("Invalid SLM")
         else:
             print("Valid SLM!")
@@ -89,23 +96,32 @@ class mechanism:
         c = np.average(self.C)
         self.MAX_THETA = 0.98*np.pi-self.law_of_cos(c-b_lower,a,a)
         N = self.calculate_state(self.MAX_THETA)
-        self.MAX_L = 2*N[5][1]
+        self.MAX_L = abs(2*N[5][1])
         self.LIMIT_THETA = self.MAX_THETA*limit
         N = self.calculate_state(self.LIMIT_THETA)
-        self.LIMIT_L = 2*N[5][1]
+        self.LIMIT_L = abs(2*N[5][1])
         return([-self.LIMIT_THETA,self.LIMIT_THETA])
     
     # Finds current state defined by nodes of mechanism  
     def calculate_state(self,theta):
         norm = lambda V: sum(V*V)**0.5
         N0 = np.array([0,0])
-        N1 = np.array([self.A[0],0])
-        N2 = N1 + np.array([self.A[1]*np.cos(theta),self.A[1]*np.sin(theta)])
-        D2 = norm(N2)   
-        theta_C1 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) + np.arccos((D2**2+self.C[1]**2-self.B[1]**2)/(2*D2*self.C[1]))
-        N3 = np.array([self.C[1]*np.cos(theta_C1),self.C[1]*np.sin(theta_C1)])
-        theta_C0 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) - np.arccos((D2**2+self.C[0]**2-self.B[0]**2)/(2*D2*self.C[0]))
-        N4 = np.array([self.C[0]*np.cos(theta_C0),self.C[0]*np.sin(theta_C0)])
+        if self.version == 1:
+            N1 = np.array([self.A[0],0])
+            N2 = N1 + np.array([self.A[1]*np.cos(theta),self.A[1]*np.sin(theta)])
+            D2 = norm(N2)   
+            theta_C1 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) + np.arccos((D2**2+self.C[1]**2-self.B[1]**2)/(2*D2*self.C[1]))
+            N3 = np.array([self.C[1]*np.cos(theta_C1),self.C[1]*np.sin(theta_C1)])
+            theta_C0 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) - np.arccos((D2**2+self.C[0]**2-self.B[0]**2)/(2*D2*self.C[0]))
+            N4 = np.array([self.C[0]*np.cos(theta_C0),self.C[0]*np.sin(theta_C0)])
+        if self.version == 2:
+            N1 = np.array([-self.A[0],0])
+            N2 = N1 + np.array([-self.A[1]*np.cos(theta),-self.A[1]*np.sin(theta)])
+            D2 = norm(N2)  
+            theta_C1 = self.law_of_cos(self.B[1],self.C[1],D2)-theta/2
+            N3 = np.array([-self.C[1]*np.cos(theta_C1),self.C[1]*np.sin(theta_C1)])
+            theta_C0 = self.law_of_cos(self.B[0],self.C[0],D2)+theta/2
+            N4 = np.array([-self.C[0]*np.cos(theta_C0),-self.C[0]*np.sin(theta_C0)])        
         D3_4 = norm(N4-N3)
         a = (self.B[3]**2-self.B[2]**2+D3_4**2)/(2*D3_4)
         h = np.sqrt(self.B[3]**2-a**2)
@@ -310,8 +326,12 @@ class mechanism:
         # Draw all nodes
         for N in self.N:
             plt.scatter(N[0],N[1],s=50,c="black",zorder=10)
-        plt.xlim([-.5, self.A[0]+self.A[1]+1*max(self.B)])
-        plt.ylim([self.path_x[0], self.path_x[-1]])
+        if self.version == 1:
+            plt.xlim([-.5*self.A[0], self.A[0]+self.A[1]+1*max(self.B)])
+            plt.ylim([self.path_x[0], self.path_x[-1]])
+        if self.version == 2:
+            plt.xlim([-1.25*(self.A[0]+self.A[1]), self.A[0]+self.A[1]+1*max(self.B)])
+            plt.ylim([self.path_x[0], self.path_x[-1]])
         plt.gca().set_aspect("equal")
         plt.grid()
         if not animation:
@@ -368,8 +388,12 @@ class mechanism:
         #Draw all nodes and deformed nodes
         for N in dN:
             plt.scatter(N[0],N[1],s=50,c="black",zorder=10)
-        plt.xlim([-.5, self.A[0]+self.A[1]+1.5*max(self.B)])
-        plt.ylim([min(self.path_x[0],self.k_path_x[0]), max(self.path_x[-1],self.k_path_x[-1])])
+        if self.version == 1:
+            plt.xlim([-.5*self.A[0], self.A[0]+self.A[1]+1.5*max(self.B)])
+            plt.ylim([min(self.path_x[0],self.k_path_x[0]), max(self.path_x[-1],self.k_path_x[-1])])
+        if self.version == 2:
+            plt.xlim([-1.25*(self.A[0]+self.A[1]), self.A[0]+self.A[1]+1*max(self.B)])
+            plt.ylim([self.path_x[0], self.path_x[-1]])
         plt.gca().set_aspect("equal")
         plt.grid()
         plt.title("SLM Path Deflection")
@@ -418,11 +442,5 @@ class mechanism:
                                 np.arange(len(self.theta_array)-1,0,-1)), interval=100, repeat=True)
             if save:
                 print("SAVING VIDEO")
-                # Writer = animation.writers['ffmpeg']
-                # writer = Writer(fps=60)
-                # self.slm_animation.save('test.mp4', writer)
-                # saving to m4 using ffmpeg writer
-                # writervideo = animation.FFMpegWriter(fps=60)
-                # self.slm_animation.save('increasingStraightLine.mp4', writer=writervideo)
                 self.slm_animation.save('stiffness_animation.gif', writer='imagemagick', fps=60)
             plt.show()

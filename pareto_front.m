@@ -1,16 +1,19 @@
 %% min stiffness
 
 close all; clear all; clc;
-sys_p = readtable("pareto_front");
+sys_p = readtable("pareto_front_v1");
 
 % apply scaling factors
 SD = 1;
-SL = 10;
+SL = 1/2;
 % scale for length
 sys_p.L = sys_p.L .* SL;
 sys_p.k_max = sys_p.k_max .* 1/SL;
 sys_p.k_min = sys_p.k_min .* 1/SL;
 sys_p.W = sys_p.W .* SL;
+sys_p.A = sys_p.A.*SL;
+sys_p.B = sys_p.B.*SL;
+sys_p.C = sys_p.C.*SL;
 % scale for diameter
 sys_p.k_max = sys_p.k_max .* SD^2;
 sys_p.k_min = sys_p.k_min .* SD^2;
@@ -28,6 +31,8 @@ title("SLM System Property Sweep (K min)")
 colorbar
 set(gca,'fontsize',16)
 
+% Best Mechanism found by previous paper
+
 % Looking at minumum stiffness of mechanism
 figure(2); clf;
 s = scatter3(sys_p.L,sys_p.W,sys_p.k_max,ones(size(sys_p.k_max)),sys_p.k_max,'filled');
@@ -40,21 +45,6 @@ title("SLM System Property Sweep (K max)")
 colorbar
 set(gca,'fontsize',16)
 
-% Weighted stiffness of mechanism
-Wmax = .5;
-Wmin = .5;
-k_weighted = Wmax.*sys_p.k_max + Wmin.*sys_p.k_min;
-
-figure(3); clf;
-s = scatter3(sys_p.L,sys_p.W,k_weighted,ones(size(sys_p.k_min)),k_weighted,'filled');
-s.SizeData = 50;
-s.ButtonDownFcn = @showZValueFcn;
-xlabel("Range (m)")
-ylabel("Weight (kg)")
-zlabel(" Weighted Stiffness (N/m)")
-title("SLM System Property Sweep (K Weighted)")
-colorbar
-set(gca,'fontsize',16)
 
 % Find best SLMs
 idx = find(sys_p.k_max==max(sys_p.k_max));
