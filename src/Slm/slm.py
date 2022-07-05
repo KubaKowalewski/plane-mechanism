@@ -1,3 +1,4 @@
+from turtle import forward
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -5,34 +6,20 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_squared_error
 from matplotlib import gridspec
 import random
+np.seterr(all='raise')
 
 class mechanism:
     # Initializes mechanism
-    def __init__(self,A,B,C,version=1,group="x",rhombus_ratio=1,**kwargs):
-        # State Variables
-        self.version = version # specifies which SLM version is being used
-        self.group = group
-        self.A = A
-        self.B = B
-        self.C = C
-        self.rhombus_ratio = rhombus_ratio
-        self.adjust_rhombus()
-        self.lengths = np.array([self.A[1],self.B[1],self.B[0],self.B[3],self.B[2],self.C[1],self.C[0]])
-        self.colors = ["red","red","blue","blue","blue","blue","purple","purple"] # Link colors
-        # Sets the animation sampling resolution
+    def __init__(self,Rr=1,Rf=False,**kwargs):
+        # Sets float resolution and step size for any animation
         self.resolution = 2
         self.step_size = 10**(-self.resolution)
-        self.theta_range = self.calculate_range()
+        # Initialize theta to zero
         self.theta = 0
-        # Adds noise to links in mechanism
-        if "add_noise" in kwargs and "noise" in kwargs and kwargs["add_noise"]:
-            max_noise = kwargs["noise"]
-            noise = lambda x: x + random.uniform(-max_noise,max_noise)
-            self.A = list(map(noise,A))
-            self.B = list(map(noise,B))
-            self.C = list(map(noise,C))
-        # Check if this is valid SLM
-        self.is_valid()
+        # Save link lengths based on parametrization
+        self.update_links(Rr,Rf,**kwargs)
+        self.lengths = np.array([self.A[1],self.B[1],self.B[0],self.B[3],self.B[2],self.C[1],self.C[0]])
+        self.colors = ["red","red","blue","blue","blue","blue","purple","purple"] # Link colors
         # Store metrics for measuring model performance
         self.coef_list = []
         self.rmse_list = []
@@ -40,180 +27,179 @@ class mechanism:
         self.link_width = 4
         self.num_links = 8
         # Find path of SLM and linear fit
-        self.path(save_error=False)
-
-    # Returns angle between L2 and L3
-    def law_of_cos(self,L1,L2,L3):
-        return np.arccos((L2**2+L3**2-L1**2)/(2*L2*L3))
-    
-    # Adjusts the B1,B3,C1 links for PL mechanisms of Y,Z group based on rhombus_ratio
-    def adjust_rhombus(self):
-        if self.group == "y" or self.group == "z":
-            if self.version == 1 or self.version == 2:
-                theta_c1 = self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[0])
-                y0 = self.C[1]*np.sin(theta_c1)
-                y1 = y0*self.rhombus_ratio
-                Cx = self.C[1]*np.cos(theta_c1)
-                Bx = abs(Cx-self.A[0]-self.A[1])
-                C_new = np.sqrt(y1**2+Cx**2)
-                B_new = np.sqrt(y1**2+Bx**2)
-                self.C[1] = C_new
-                self.B[1] = B_new
-                self.B[3] = B_new
-            if self.version == 3:
-                theta_b1 = self.law_of_cos(self.C[1],self.B[1],self.A[0]+self.A[0])
-                y0 = self.B[1]*np.sin(theta_b1)
-                y1 = y0*self.rhombus_ratio
-                Bx = self.B[1]*np.cos(theta_b1)
-                Cx = abs(Bx-self.A[0]-self.A[1])
-                C_new = np.sqrt(y1**2+Cx**2)
-                B_new = np.sqrt(y1**2+Bx**2)
-                self.C[1] = C_new
-                self.B[1] = B_new
-                self.B[3] = B_new
-
-    ####################
-    # Update Functions
-    ####################
+        if "path_off" not in kwargs:
+            self.path(save_error=False)
 
     # Updates mechanism with new links
-    def update_links(self,A=[],B=[],C=[],group = "x",rr=1,**kwargs):
-        # Method 1 of passing new data in
-        if len(A) > 0: self.A = A
-        if len(B) > 0: self.B = B
-        if len(C) > 0: self.C = C
-        self.group = group
-        self.rhombus_ratio = rr
-        self.adjust_rhombus()
-        # Method 2 of passing new data in
-        if "dA" in kwargs: self.A += kwargs["dA"]
-        if "dB" in kwargs: self.B += kwargs["dB"]
-        if "dC" in kwargs: self.C += kwargs["dC"]
-        # Check if valid
-        self.is_valid()
-        # Find range
+    def update_links(self,Rr,Rf,**kwargs):
+        self.Rr = Rr
+        self.Rf = Rf
+        # A/B/C Parametrization
+        if ("A" in kwargs and "B" in kwargs and "C" in kwargs):
+            self.A = np.array([kwargs["A"]]*2)
+            self.B = np.array([kwargs["B"]]*4)
+            self.C = np.array([kwargs["C"]]*2)
+            # Finds Rw and Rh Parameters
+            self.__find_RwRh()
+        # A/rh/rw parametrization
+        elif ("A" in kwargs and "Rw" in kwargs and "Rh" in kwargs):
+            self.A = np.array([kwargs["A"]]*2)
+            self.Rw = kwargs["Rw"]
+            self.Rh = kwargs["Rh"]
+            if self.Rh <= 0 or self.Rw == 0 or self.Rw == -self.A[0]:
+                raise Exception("Invalid SLM based on Rw and Rh")
+            # Finds B and C links
+            self.__find_BC()
+        # Specify mechanism class
+        if self.Rw > 0: self.version = 1
+        elif self.Rw < 0 and self.Rw > -self.A[0]: self.version = 2
+        elif self.Rw < -self.A[0]: self.version = 3
+        # Specify mechanism group
+        self.group = "x"
+        if self.Rr != 1: self.group = "y"
+        if self.Rr != 1 and self.Rf: self.group = "z"
+        # Adjust rhombus based on Rr (rhombus ratio)
+        self.__adjust_rhombus()
+        self.__is_valid()
         self.theta_range = self.calculate_range()
 
-    # Swaps links in the symmetric groups
-    def swap_symmetric(self):
-        self.A = np.array([self.A[1],self.A[0]])
-        # self.B = np.array([self.B[2],self.B[3],self.B[0],self.B[1]])
-        
-    def swap_anti_symmetric(self):
-        pass
+    # Adds random noise to mechanism
+    # def add_noise(self,eA,eB,eC):
+    #     # Adds noise to links in mechanism
+    #     noise = lambda x: x + np.random.normal(0,std,1)[0]
+    #     self.A = list(map(noise,self.A))
+    #     self.B = list(map(noise,self.B))
+    #     self.C = list(map(noise,self.C))
+    #     self.path(save_error=False)
+
+    # Returns angle between L2 and L3
+    def __law_of_cos(self,L1,L2,L3,mode="rad"):
+        ratio  = round((L2**2+L3**2-L1**2)/(2*L2*L3),5)
+        try:
+            T = np.arccos(ratio)
+            if mode == "deg": T = np.rad2deg(T)
+            return T
+        except:
+            print("Arc Cos Error:",L1,L2,L3,ratio)
+
+    # Find Rw and Rh if A/B/C parametrication used
+    def __find_RwRh(self):
+        theta_C0A0 = self.__law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
+        self.Rh = self.C[0]*np.sin(theta_C0A0)
+        self.Rw = self.C[0]*np.cos(theta_C0A0)-self.A[0]-self.A[1]
     
+    # Finds B and C link lengths when using A/Rh/Rw parametrization
+    def __find_BC(self):
+        B = np.sqrt(self.Rw**2+self.Rh**2)
+        C = np.sqrt((self.A[0]+self.A[1]+self.Rw)**2+self.Rh**2)
+        self.B = np.array([B]*4)
+        self.C = np.array([C]*2)
+    
+    # Adjusts the B1,B3,C1 links for PL mechanisms of Y,Z group based on rhombus_ratio
+    def __adjust_rhombus(self):
+        if self.Rr > 1: 
+            raise Exception("Invalid Rhombus Ratio")
+        if self.Rr != 1:
+            Rh_adjust = self.Rh*self.Rr
+            B_adjust = np.sqrt(self.Rw**2+Rh_adjust**2)
+            C_adjust = np.sqrt((self.A[0]+self.A[1]+self.Rw)**2+Rh_adjust**2)
+            self.B[0] = B_adjust
+            self.B[2] = B_adjust
+            self.C[0] = C_adjust
+    
+    # Checks if 3 lengths give a valid triangle
+    def __valid_tri(self,a,b,c):
+        return a+b>=c and b+c>=a and c+a>=b
+    
+    # Checks if link lengths with possible length errors are valid
+    def __is_valid(self):
+        # Checks if A,B0/B1,C links form a valid triangle
+        valid_upper = self.__valid_tri(self.A[0]+self.A[1],self.B[1],self.C[1])
+        valid_lower = self.__valid_tri(self.A[0]+self.A[1],self.B[0],self.C[0])
+        # Checks if B2 and B3 will connect to form an end point
+        theta_upper = self.__law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
+        theta_lower = self.__law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
+        valid_end_point = (self.B[3] > self.C[1]*np.cos(theta_upper)) and (self.B[2] > self.C[0]*np.cos(theta_lower))
+        if not valid_upper and valid_lower and valid_end_point:
+            raise Exception("Invalid SLM")
+        
     ####################
     # Forward Kinematics
     ####################
 
-    # Checks if link lengths create valid mechanism
-    def is_valid(self):
-        # Checks if valid link lengths are provided for specific mechanism version
-        if self.version == 1:
-            valid_B_C = min(self.B) < min(self.C)
-            valid_obtuse_upper = (np.sqrt((self.A[0]+self.A[1])**2+self.B[1]**2) < self.C[1]) and (self.B[1] + self.A[0] + self.A[1] > self.C[1])
-            valid_obtuse_lower = (np.sqrt((self.A[0]+self.A[1])**2+self.B[0]**2) < self.C[0]) and (self.B[0] + self.A[0] + self.A[1] > self.C[0])
-            # Check that upper links can connect to form an end point
-            theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
-            theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
-            valid_end_point = (self.B[2] > self.C[0]*np.cos(theta0)) and (self.B[3] > self.C[1]*np.cos(theta1))
-            valid =  valid_B_C and valid_obtuse_upper and valid_obtuse_lower and valid_end_point
-            # continous_range = (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[0]**2) < self.C[0]) and (np.sqrt(((self.A[0] + self.A[1])**2) + self.B[1]**2) < self.C[1])
-            # valid_lower = (self.A[0] + self.A[1] + self.B[0] > self.C[0]) and (self.A[0] + self.A[1] + self.B[1] > self.C[1])
-            # theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
-            # theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
-            # valid_upper = (self.B[2] > self.C[0]*np.cos(theta0)) and (self.B[3] > self.C[1]*np.cos(theta1))
-        if self.version == 2:
-            valid_B_C = min(self.B) < min(self.C)
-            valid_acute_upper = (np.sqrt((self.A[0]+self.A[1])**2+self.B[1]**2) > self.C[1]) and (self.C[1] + self.B[1] > self.A[0] + self.A[1])
-            valid_acute_lower = (np.sqrt((self.A[0]+self.A[1])**2+self.B[0]**2) > self.C[0]) and (self.C[0] + self.B[0] > self.A[0] + self.A[1])
-            valid = valid_B_C and valid_acute_upper and valid_acute_lower
-            # Check that upper links can connect to form an end point
-            theta0 = (np.pi/2)-self.law_of_cos(self.B[0],self.C[0],self.A[0]+self.A[1])
-            theta1 = (np.pi/2)-self.law_of_cos(self.B[1],self.C[1],self.A[0]+self.A[1])
-            valid_end_point = (self.B[2] > self.C[0]*np.cos(theta0)) and (self.B[3] > self.C[1]*np.cos(theta1))
-            valid =  valid_B_C and valid_acute_upper and valid_acute_lower and valid_end_point
-        if self.version == 3:
-            valid_B_C = min(self.B) > min(self.C)
-            valid_acute_upper = (np.sqrt((self.A[0]+self.A[1])**2+self.C[1]**2) > self.B[1]) and (self.C[1] + self.B[1] > self.A[0] + self.A[1])
-            valid_acute_lower = (np.sqrt((self.A[0]+self.A[1])**2+self.C[0]**2) > self.B[0]) and (self.C[0] + self.B[0] > self.A[0] + self.A[1])
-            valid_obtuse_upper = (np.sqrt((self.A[0]+self.A[1])**2+self.C[1]**2) < self.B[1]) and (self.C[1] + self.A[0] + self.A[1] > self.B[1])
-            valid_obtuse_lower = (np.sqrt((self.A[0]+self.A[1])**2+self.C[0]**2) < self.B[0]) and (self.C[0] + self.A[0] + self.A[1] > self.B[0])
-            # Check that upper links can connect to form an end point
-            theta0 = (np.pi/2)-self.law_of_cos(self.C[0],self.B[0],self.A[0]+self.A[1])
-            theta1 = (np.pi/2)-self.law_of_cos(self.C[1],self.B[1],self.A[0]+self.A[1])
-            valid_end_point = (self.B[2] > self.B[0]*np.cos(theta0)) and (self.B[3] > self.B[1]*np.cos(theta1))
-            valid = ((valid_acute_upper and valid_acute_lower) or (valid_obtuse_upper and valid_obtuse_lower)) and valid_B_C and valid_end_point
-        if not valid:
-            raise Exception("Invalid SLM")
-        else:
-            print("Valid SLM!")
-
     # Find workspace limits defined by maximum theta value
     def calculate_range(self):
-        limit = 0.90 # Per side so 90% total
-        a = np.average(self.A)
-        b_lower = min([self.B[0],self.B[1]])
-        c = min(self.C)
+        limit = 0.9
+        # Find max theta based on collapsed rhombus
         if self.version == 1 or self.version == 3:
-            self.MAX_THETA = 0.98*np.pi-self.law_of_cos(c-b_lower,a,a)
+            self.MAX_THETA = 0.98*(np.pi - self.__law_of_cos(abs(self.C[0]-self.B[0]),self.A[0],self.A[1]))
         if self.version == 2:
-            self.MAX_THETA = 0.98*self.law_of_cos(b_lower,c-a,a)
-        self.MAX_THETA = round(self.MAX_THETA,self.resolution)
-        N = self.calculate_state(self.MAX_THETA)
-        self.MAX_L = abs(2*N[5][1])
-        self.LIMIT_THETA = round(self.MAX_THETA*limit,self.resolution)
-        N = self.calculate_state(self.LIMIT_THETA)
-        self.LIMIT_L = abs(2*N[5][1])
+            self.MAX_THETA = 0.98*(self.__law_of_cos(self.B[0],abs(self.C[0]-self.A[0]),self.A[1]))
+        # Find max workspace
+        N = self.forward_kinematics(self.MAX_THETA)
+        self.MAX_RANGE = abs(2*N[5][1])
+        # Find workspace based on limit %
+        self.LIMIT_THETA = self.MAX_THETA*limit
+        N = self.forward_kinematics(self.LIMIT_THETA)
+        self.LIMIT_RANGE = abs(2*N[5][1])
+        # Find height of mechanism
+        N = self.forward_kinematics(0)
+        # Return theta range
         return([-self.LIMIT_THETA,self.LIMIT_THETA])
-    
-    # Forward kinematics for each node in mechanism without assuming equal lengths in respective link groups
-    # This allows any valid PL and PL-Like Mechanism to be calclated  
-    def calculate_state(self,theta):
-        norm = lambda V: sum(V*V)**0.5
+        
+    # Calculates forward kinematics for mechanism
+    def forward_kinematics(self,theta):
+        # Define homogenous 2D transformation function  
+        h_t = lambda T,dX,dY: np.vstack(([np.cos(T),-np.sin(T),dX],[np.sin(T),np.cos(T),dY],[0,0,1]))
+        # Distance between two points   
+        dist = lambda P1,P2: sum((P1-P2)**2)**0.5
+        # N0 (origin)
         N0 = np.array([0,0])
-        if self.version == 1 or self.version == 2:
-            N1 = np.array([self.A[0],0])
-            N2 = N1 + np.array([self.A[1]*np.cos(theta),self.A[1]*np.sin(theta)])
-            D2 = norm(N2)   
-            theta_C1 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) + np.arccos((D2**2+self.C[1]**2-self.B[1]**2)/(2*D2*self.C[1]))
-            N3 = np.array([self.C[1]*np.cos(theta_C1),self.C[1]*np.sin(theta_C1)])
-            theta_C0 = np.arctan(self.A[1]*np.sin(theta)/(self.A[0]+self.A[1]*np.cos(theta))) - np.arccos((D2**2+self.C[0]**2-self.B[0]**2)/(2*D2*self.C[0]))
-            N4 = np.array([self.C[0]*np.cos(theta_C0),self.C[0]*np.sin(theta_C0)])
-        if self.version == 3:
-            N1 = np.array([-self.A[0],0])
-            N2 = N1 + np.array([-self.A[1]*np.cos(theta),-self.A[1]*np.sin(theta)])
-            D2 = norm(N2)  
-            theta_C1 = self.law_of_cos(self.B[1],self.C[1],D2)-theta/2
-            N3 = np.array([-self.C[1]*np.cos(theta_C1),self.C[1]*np.sin(theta_C1)])
-            theta_C0 = self.law_of_cos(self.B[0],self.C[0],D2)+theta/2
-            N4 = np.array([-self.C[0]*np.cos(theta_C0),-self.C[0]*np.sin(theta_C0)])
-        # End point is at intersection of the two circles defined by links B2, B2 located at N3 and N4
-        # https://math.stackexchange.com/questions/256100/how-can-i-find-the-points-at-which-two-circles-intersect      
-        D3_4 = norm(N4-N3)
-        a = (self.B[3]**2-self.B[2]**2+D3_4**2)/(2*D3_4)
-        h = np.sqrt(self.B[3]**2-a**2)
-        P2 = N3 + a*(N4-N3)/D3_4
-        # Outer intersection of circles
-        if self.version == 1 or self.version == 3:
-            N5y = P2[1]+h*(N4[0]-N3[0])/D3_4
-            N5x = P2[0]-h*(N4[1]-N3[1])/D3_4
-        # Inner intersection of circles
-        if self.version == 2:
-            N5y = P2[1]-h*(N4[0]-N3[0])/D3_4
-            N5x = P2[0]+h*(N4[1]-N3[1])/D3_4
-        N5 = np.array([N5x,N5y])
-        # Apply z group reflection
-        if self.group == "z":
-            b = N5y/N5x
+        # N1 
+        T_N1 = h_t(0,self.A[0],0)
+        N1 = T_N1[0:2,2]
+        # N2
+        T_N2 = T_N1@h_t(theta,0,0)@h_t(0,self.A[1],0)
+        N2 = T_N2[0:2,2]
+        D2 = dist(N0,N2)
+        phi_DA0 = np.arctan2(self.A[1]*np.sin(theta),self.A[0]+self.A[1]*np.cos(theta))
+        # N3
+        phi_B1D = self.__law_of_cos(self.C[1],self.B[1],D2)
+        theta_B1 = (np.pi - phi_DA0 - phi_B1D)
+        T_N3 = T_N2@h_t(theta_B1,0,0)@h_t(0,self.B[1],0)
+        N3 = T_N3[0:2,2]
+        # N4
+        phi_B0D = self.__law_of_cos(self.C[0],self.B[0],D2)
+        theta_B0 = -(np.pi + phi_DA0 - phi_B0D)
+        T_N4 = T_N2@h_t(theta_B0,0,0)@h_t(0,self.B[0],0)
+        N4 = T_N4[0:2,2]
+        # N5
+        D34 = dist(N3,N4)
+        gamma_B1D34 = self.__law_of_cos(self.B[0],self.B[1],D34)
+        gamma_B3D34 = self.__law_of_cos(self.B[2],self.B[3],D34)
+        if self.version == 1: theta_B3 = np.pi + gamma_B1D34 + gamma_B3D34
+        if self.version == 2 or self.version == 3: theta_B3 = np.pi - gamma_B1D34 - gamma_B3D34
+        T_N5 = T_N3@h_t(theta_B3,0,0)@h_t(0,self.B[3],0)
+        N5 = T_N5[0:2,2]
+        # Applys reflection if specified (Z group)
+        if self.Rf:
+            b = N5[1]/N5[0]
+            # T = (1/(1+m**2))*np.vstack(([1-m**2,2*m],[2*m,m**2-1]))
             N3x = (N3[0]*(1-b**2)-2*b*(-N3[1]))/(1+b**2)
             N3y = (N3[1]*(b**2-1)+2*(b*N3[0]))/(1+b**2)
+            # N3 = T@N3
             N3 = np.array([N3x,N3y])
-        return([N0,N1,N2,N3,N4,N5])
-    
+        N = [N0,N1,N2,N3,N4,N5]
+        # Class 3 reflection to keep consistent orientation
+        if self.version == 3:
+            T = np.vstack(([-1,0],[0,1]))
+            for i in range(len(N)): N[i] = T@N[i]
+        # Returns full list of nodes
+        return N
+
     # Updates all nodes within mechanism
     def update_state(self):
-        self.N = self.calculate_state(self.theta)
+        self.N = self.forward_kinematics(self.theta)
 
     ####################
     # Path Calculations
@@ -233,23 +219,41 @@ class mechanism:
     def find_link_angles(self,N):
         return([self.n2t(N[1],N[2]),self.n2t(N[2],N[3]),self.n2t(N[2],N[4]),self.n2t(N[3],N[5]),self.n2t(N[4],N[5]),self.n2t(N[0],N[3]),self.n2t(N[0],N[4])])
 
+    # Absolute error from line of best fit
+    def find_error(self,coef,intercept,points):
+        e_list = []
+        e_max = 0
+        X = points[0]
+        Y = points[1]
+        n = len(X)
+        for i in range(n):
+            x,y = X[i],Y[i]
+            e = (coef*x-y+intercept)/np.sqrt(coef**2+1)
+            if abs(e) > abs(e_max): e_max = e
+            e_list.append(e)
+        return(e_list,e_max)
+
     # Calculates path of mechanism across theta range        
     def path(self,save_error=True):
         # Calculates path
         self.path_x = []
         self.path_y = []
         for i in np.arange(self.theta_range[0],self.theta_range[1]+self.step_size,self.step_size):
-            N = self.calculate_state(i)
+            N = self.forward_kinematics(i)
             self.path_y.append(N[-1][0])
             self.path_x.append(N[-1][1])
 
         # Finds linear fit for path
         self.path_x_T = np.array(self.path_x).reshape(-1,1) # Transpose
+        self.path_x = np.array(self.path_x)
+        self.path_y = np.array(self.path_y)
         model = LinearRegression().fit(self.path_x_T, self.path_y)
         self.fit_x = self.path_x
         self.fit_y = model.predict(self.path_x_T)
         self.coef = model.coef_
+        self.intercept = model.intercept_
         self.rmse = mean_squared_error(self.path_y,self.fit_y,squared=False)
+        self.e_list,self.e_max = self.find_error(self.coef,self.intercept,(self.path_x,self.path_y))
         self.path_list = list(zip(self.path_x,self.path_y))
         return(self.path_x,self.path_y)
 
@@ -265,7 +269,7 @@ class mechanism:
         # Code numbers for each link found externally
         CN = [[9,10,7,8],[7,8,5,6],[7,8,3,4],[5,6,1,2],[3,4,1,2],[11,12,5,6],[11,12,3,4]]
         NDOF = 8 # SLM has 8 dof structurally
-        A = (np.pi/4)*(D/1000)**2
+        A = (np.pi/4)*(D)**2
         K_members = []
         # Finds the stiffness matrix of each link in global coordinate frame
         for i in range(len(thetas)):
@@ -288,7 +292,7 @@ class mechanism:
                         col = cn_m[j]
                         if col <= NDOF:
                             Ks[row-1][col-1]+=K_members[m][i][j]
-        tol = 0.0001
+        tol = 10e-9
         # Use psudeo inverse to find best fit for compliance matrix
         Cs = np.linalg.pinv(Ks, rcond=tol)
         k_y = 1/(Cs[1][1])
@@ -305,15 +309,18 @@ class mechanism:
         return dN
     
     # Finds stiffness of mechanism along entire path
-    def path_stiffness(self,F,thetas,E,D):
+    def path_stiffness(self,F,E,D,theta_array=[]):
         self.ky_array = []
         self.d_array = []
         self.k_path_x = []
         self.k_path_y = []
-        self.theta_array = np.linspace(self.theta_range[0],self.theta_range[1],
-                            (self.theta_range[1]-self.theta_range[0])/self.step_size)
+        if len(theta_array) == 0:
+            self.theta_array = np.linspace(self.theta_range[0],self.theta_range[1],
+                                int((self.theta_range[1]-self.theta_range[0])/self.step_size))
+        else:
+            self.theta_array = theta_array
         for i in self.theta_array:
-            N = self.calculate_state(i)
+            N = self.forward_kinematics(i)
             thetas = self.find_link_angles(N)
             k_res = self.calculate_stiffness(F,thetas,E,D)
             ky = k_res[0]
@@ -328,17 +335,17 @@ class mechanism:
 
     # Returns all relevant system properties
     def find_system_properties(self,F,E,D,P):
-        n = 100
-        thetas = np.linspace(-self.LIMIT_THETA,self.LIMIT_THETA,n)
+        n = 50
+        theta_array = np.linspace(-self.LIMIT_THETA,self.LIMIT_THETA,n)
         # Maximum stiffness
-        full_stiffness = self.path_stiffness(F,thetas,E,D)
+        full_stiffness = self.path_stiffness(F,E,D,theta_array)
         k_max = max(full_stiffness) # Max stiffness
         # Minimum stiffness
         k_min = min(full_stiffness) # min stiffness
         L = np.sum(np.concatenate((self.A,self.B,self.C)))
-        A = (np.pi/4)*(D/1000)**2
-        weight = L*A*P
-        return(k_max,k_min,self.LIMIT_L,weight)
+        A = (np.pi/4)*(D)**2
+        mass = L*A*P
+        return(k_max,k_min,self.LIMIT_RANGE,mass)
 
     ####################
     # KINEMATIC ANIMATION
@@ -386,7 +393,7 @@ class mechanism:
         plt.show()
 
     # Draws mechanism and path in for its current state
-    def draw(self,animation=False,save=False,path="./images/slm.jpg",debug=False):
+    def draw(self,animation=False,save=False,path="./images/slm.jpg",debug=False,draw_path=True):
         # Determines if drawing for animation or not
         if not animation:
             fig = plt.figure(3)
@@ -396,11 +403,12 @@ class mechanism:
             self.ax.cla()
         # Animation Parameters
         link_size = 5
-        dot_size = 50
+        dot_size = 7
         path_size = 3
         # Draws path
-        plt.plot(self.path_y,self.path_x,linewidth = path_size)
-        #plt.plot(self.fit_y,self.fit_x,'r')
+        if draw_path:
+            plt.plot(self.path_y,self.path_x)
+            plt.plot(self.fit_y,self.fit_x,'r')
         n_p = [(0,1),(1,2),(2,3),(2,4),(3,5),(4,5),(0,3),(0,4)] # Node pairs
         # Draw all links
         for i in range(self.num_links):
@@ -410,7 +418,7 @@ class mechanism:
                     linewidth=link_size,c=self.colors[i])
         # Draw all nodes
         for N in self.N:
-            plt.scatter(N[0],N[1],s=dot_size,c="black",zorder=10)
+            plt.scatter(N[0],N[1],linewidth=dot_size,c="black",zorder=10)
 
         # Set plot limits
         # if self.version == 1:
@@ -421,7 +429,7 @@ class mechanism:
         # if self.version == 3:
         #     plt.xlim([-1.25*(self.A[0]+self.A[1]), 1.2*max(self.path_y)])
         #     plt.ylim([self.path_x[0], self.path_x[-1]])
-        # plt.gca().set_aspect("equal")
+        plt.gca().set_aspect("equal")
         #plt.grid()
         # self.ax.set_aspect("equal")
 
@@ -445,6 +453,7 @@ class mechanism:
             print("C0: ", self.C[0], "Calc: ", C0_calc)
             print("C1: ", self.C[1], "Calc: ", C1_calc)
         # Saves figure to specified path
+        plt.axis('off')
         if save:
             fig.set_size_inches(4, 4)
             fig.tight_layout()

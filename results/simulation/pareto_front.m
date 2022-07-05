@@ -1,32 +1,31 @@
 %% min stiffness
 
 close all; clear all; clc;
-sys_p = readtable("pareto_front");
+sys_p = readtable("sim_results4");
 
 % apply scaling factors
 SD = 1;
 SL = 1;
 
 % scale for length
-sys_p.L = sys_p.L .* SL;
+sys_p.Range = sys_p.Range .* SL;
 sys_p.k_max = sys_p.k_max .* 1/SL;
 sys_p.k_min = sys_p.k_min .* 1/SL;
-sys_p.W = sys_p.W .* SL;
+sys_p.Mass = sys_p.Mass .* SL;
 sys_p.A = sys_p.A.*SL;
-sys_p.B = sys_p.B.*SL;
-sys_p.C = sys_p.C.*SL;
+
 % scale for diameter
 sys_p.k_max = sys_p.k_max .* SD^2;
 sys_p.k_min = sys_p.k_min .* SD^2;
-sys_p.W = sys_p.W .* SD^2;
+sys_p.Mass = sys_p.Mass .* SD^2;
 
 % Looking at min stiffness of mechanism
 figure(1); clf
-s = scatter3(sys_p.L,sys_p.W,sys_p.k_min,ones(size(sys_p.k_min)),sys_p.k_min,'filled');
+s = scatter3(sys_p.Range,sys_p.Mass,sys_p.k_min,ones(size(sys_p.k_min)),sys_p.k_min,'filled');
 s.SizeData = 50;
 s.ButtonDownFcn = @showZValueFcn;
 xlabel("Range (m)")
-ylabel("Weight (kg)")
+ylabel("Mass (kg)")
 zlabel(" Min Stiffness (N/m)")
 title("SLM System Property Sweep (K min)")
 colorbar
@@ -34,27 +33,15 @@ set(gca,'fontsize',20)
 
 % Looking at max stiffness of mechanism
 figure(2); clf;
-s = scatter3(sys_p.L,sys_p.W,sys_p.k_max,ones(size(sys_p.k_max)),sys_p.k_max,'filled');
+s = scatter3(sys_p.Range,sys_p.Mass,sys_p.k_max,ones(size(sys_p.k_max)),sys_p.k_max,'filled');
 s.SizeData = 50;
 s.ButtonDownFcn = @showZValueFcn;
 xlabel("Range (m)")
-ylabel("Weight (kg)")
+ylabel("Mass (kg)")
 zlabel("Max Stiffness (N/m)")
 title("SLM System Property Sweep (K max)")
 colorbar
 set(gca,'fontsize',20)
-
-
-% Find best SLMs
-idx = find(sys_p.k_max==max(sys_p.k_max));
-fprintf('(Best Max Stiffness) A B C = [%0.5f %0.5f %0.5f]\n', sys_p.A(idx), sys_p.B(idx), sys_p.C(idx))
-
-idx = find(sys_p.k_min==max(sys_p.k_min));
-fprintf('(Best Min Stiffness) A B C = [%0.5f %0.5f %0.5f]\n', sys_p.A(idx), sys_p.B(idx), sys_p.C(idx))
-
-idx = find((sys_p.L./sys_p.W)==max(sys_p.L./sys_p.W));
-fprintf('(Best Range/Weight Ratio) A B C = [%0.5f %0.5f %0.5f]\n', sys_p.A(idx), sys_p.B(idx), sys_p.C(idx))
-
 
 % axh.ButtonDownFcn = {@showZValueFcn, x, y, z};  % old version of answer
 function [coordinateSelected, minIdx] = showZValueFcn(hObj, event)

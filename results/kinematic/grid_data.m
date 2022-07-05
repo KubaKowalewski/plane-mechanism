@@ -1,10 +1,10 @@
 % Pull in data
 clear all; clc;
-T = readtable('./flexure_6-2-2022-export.csv');
+T = readtable('./Granite_Tests_6_30_2022.csv');
 T = rmmissing(T);
 T.X = T.X;
 T.Y = T.Y;
-T.Z = T.Z;
+T.Z = T.Z./39.37; % Convert thou to mm
 % Find best fit plane
 [n,V,p] = plane_fit([T.X,T.Y,T.Z]);
 a= n(1);
@@ -44,7 +44,7 @@ figure(2); clf; hold on
     
 axis equal
 grid on
-title("PL-PPM Opitrack Motion")
+title("PPM Grid Sampling")
 set(gca,'fontsize',16)
 
 % Plot all points
@@ -74,7 +74,10 @@ ylabel("Y (mm)");
 zlabel("Z (mm)");
 
 % Plot all the points
-scatter3(T.X,T.Y,T.Z,[],D,'filled');
+X = reshape(T.X,[7,6]);
+Y = reshape(T.Y,[7,6]);
+Z = reshape(T.Z,[7,6]);
+surf(X,Y,Z)
 hcb = colorbar;
 hcb.Label.String = 'Error (mm)';
 
