@@ -1,4 +1,3 @@
-from turtle import forward
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -62,15 +61,6 @@ class mechanism:
         self.__adjust_rhombus()
         self.__is_valid()
         self.theta_range = self.calculate_range()
-
-    # Adds random noise to mechanism
-    # def add_noise(self,eA,eB,eC):
-    #     # Adds noise to links in mechanism
-    #     noise = lambda x: x + np.random.normal(0,std,1)[0]
-    #     self.A = list(map(noise,self.A))
-    #     self.B = list(map(noise,self.B))
-    #     self.C = list(map(noise,self.C))
-    #     self.path(save_error=False)
 
     # Returns angle between L2 and L3
     def __law_of_cos(self,L1,L2,L3,mode="rad"):
